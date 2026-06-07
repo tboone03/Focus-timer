@@ -20,11 +20,25 @@ except ImportError:
     print("This app requires customtkinter. Install:  pip install customtkinter")
     sys.exit(1)
 
+import secrets
 import psutil
 
+# Windows-specific: exe metadata, icons, window titles
+# Install with: pip install pywin32
+try:
+    import win32api
+    import win32gui
+    import win32con
+    import win32ui
+    import win32process
+    from PIL import Image as _PILImage
+    _WIN32_AVAILABLE = True
+except ImportError:
+    _WIN32_AVAILABLE = False
 
 
 _TIMER_INSTANCE = None
+_API_TOKEN: str = secrets.token_hex(16)  # generated once per process
 
 class FocusAPIHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -39,55 +53,93 @@ class FocusAPIHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/status":
-            global _TIMER_INSTANCE
+            global _TIMER_INSTANCE, _API_TOKEN
             if _TIMER_INSTANCE:
                 _TIMER_INSTANCE.last_ext_sync = time.time()
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Origin", "null")
             self.end_headers()
 
-            if _TIMER_INSTANCE and _TIMER_INSTANCE.session_state == "active":
+            inst = _TIMER_INSTANCE
+            if inst and inst.session_state in ("active", "paused"):
                 allowed_domains = [
-                    entry.strip().lower() for entry in _TIMER_INSTANCE.whitelist 
+                    entry.strip().lower() for entry in inst.whitelist
                     if "\\" not in entry and "/" not in entry and "." in entry
                 ]
-                
-                allowed_domains.extend(["toledo", "login", "microsoftonline", "google", "kuleuven"])
-                
                 now = time.time()
-                _TIMER_INSTANCE.temp_whitelist = {k: v for k, v in _TIMER_INSTANCE.temp_whitelist.items() if v > now}
-                allowed_domains.extend(_TIMER_INSTANCE.temp_whitelist.keys())
+                inst.temp_whitelist = {k: v for k, v in inst.temp_whitelist.items() if v > now}
+                allowed_domains.extend(inst.temp_whitelist.keys())
 
+                remaining = max(0, inst.session_end_time - now) if inst.session_state == "active" else (inst.paused_remaining or 0)
                 response_data = {
                     "active": True,
-                    "whitelist": allowed_domains
+                    "paused": inst.session_state == "paused",
+                    "whitelist": allowed_domains,
+                    "remaining_seconds": int(remaining),
+                    "total_seconds": inst.session_total_seconds,
+                    "mode": inst.mode,
+                    "streak": inst.streak,
+                    "xp_total": inst.xp_total,
+                    "session_xp": inst.session_xp_earned,
+                    "token": _API_TOKEN,
                 }
             else:
-                response_data = {"active": False, "whitelist": []}
+                response_data = {
+                    "active": False,
+                    "whitelist": [],
+                    "token": _API_TOKEN,
+                    "streak": inst.streak if inst else 0,
+                    "xp_total": inst.xp_total if inst else 0,
+                }
 
             self.wfile.write(json.dumps(response_data).encode("utf-8"))
 
-    def do_POST(self):
-        if self.path == "/bypass":
-            content_length = int(self.headers.get('Content-Length', 0))
-            if content_length > 0:
-                try:
-                    post_data = self.rfile.read(content_length)
-                    data = json.loads(post_data.decode("utf-8"))
-                    domain = data.get("domain", "").lower()
-                    global _TIMER_INSTANCE
-                    if _TIMER_INSTANCE and domain:
-                        _TIMER_INSTANCE.temp_whitelist[domain] = time.time() + 120
-                except Exception as e:
-                    print("Bypass error:", e)
+    def _check_token(self):
+        """Return True if request carries the correct auth token."""
+        global _API_TOKEN
+        provided = self.headers.get("X-Focus-Token", "")
+        return secrets.compare_digest(provided, _API_TOKEN)
 
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps({"success": True}).encode("utf-8"))
+    def do_POST(self):
+        global _TIMER_INSTANCE
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = {}
+        if content_length > 0:
+            try:
+                body = json.loads(self.rfile.read(content_length).decode("utf-8"))
+            except Exception:
+                pass
+
+        if self.path == "/bypass":
+            if not self._check_token():
+                self.send_response(403)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "null")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "forbidden"}).encode("utf-8"))
+                return
+            domain = body.get("domain", "").lower().strip()
+            if _TIMER_INSTANCE and domain:
+                _TIMER_INSTANCE.temp_whitelist[domain] = time.time() + 120
+
+        elif self.path == "/pause":
+            if not self._check_token():
+                self.send_response(403)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "null")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "forbidden"}).encode("utf-8"))
+                return
+            if _TIMER_INSTANCE:
+                _TIMER_INSTANCE.root.after(0, _TIMER_INSTANCE._toggle_pause)
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "null")
+        self.end_headers()
+        self.wfile.write(json.dumps({"success": True}).encode("utf-8"))
 
 def start_local_api_server():
     try:
@@ -137,22 +189,201 @@ SYSTEM_WHITELIST = {
 }
 
 FRIENDLY = {
+    # Microsoft Office
     "winword.exe": "Microsoft Word", "excel.exe": "Microsoft Excel",
     "powerpnt.exe": "Microsoft PowerPoint", "outlook.exe": "Microsoft Outlook",
-    "onenote.exe": "Microsoft OneNote", "code.exe": "VS Code",
-    "devenv.exe": "Visual Studio", "chrome.exe": "Google Chrome",
-    "firefox.exe": "Mozilla Firefox", "msedge.exe": "Microsoft Edge",
-    "brave.exe": "Brave", "discord.exe": "Discord", "spotify.exe": "Spotify",
-    "steam.exe": "Steam", "vlc.exe": "VLC", "notepad.exe": "Notepad",
-    "notepad++.exe": "Notepad++", "obs64.exe": "OBS Studio",
+    "onenote.exe": "Microsoft OneNote", "msaccess.exe": "Microsoft Access",
+    "mspub.exe": "Microsoft Publisher", "visio.exe": "Microsoft Visio",
+    "lync.exe": "Microsoft Lync",
+    # Dev tools
+    "code.exe": "Visual Studio Code", "devenv.exe": "Visual Studio",
+    "idea64.exe": "IntelliJ IDEA", "idea.exe": "IntelliJ IDEA",
+    "pycharm64.exe": "PyCharm", "pycharm.exe": "PyCharm",
+    "webstorm64.exe": "WebStorm", "clion64.exe": "CLion",
+    "datagrip64.exe": "DataGrip", "rider64.exe": "Rider",
+    "goland64.exe": "GoLand", "phpstorm64.exe": "PhpStorm",
+    "android studio.exe": "Android Studio",
+    "androidstudio64.exe": "Android Studio",
+    "eclipse.exe": "Eclipse", "notepad++.exe": "Notepad++",
+    "notepad.exe": "Notepad", "sublime_text.exe": "Sublime Text",
+    "atom.exe": "Atom", "vim.exe": "Vim", "nvim.exe": "Neovim",
+    "emacs.exe": "Emacs", "cursor.exe": "Cursor",
+    "windsurf.exe": "Windsurf",
+    # Browsers
+    "chrome.exe": "Google Chrome", "firefox.exe": "Mozilla Firefox",
+    "msedge.exe": "Microsoft Edge", "brave.exe": "Brave",
+    "opera.exe": "Opera", "vivaldi.exe": "Vivaldi",
+    "waterfox.exe": "Waterfox", "librewolf.exe": "LibreWolf",
+    # Communication
+    "discord.exe": "Discord", "slack.exe": "Slack",
     "teams.exe": "Microsoft Teams", "ms-teams.exe": "Microsoft Teams",
-    "slack.exe": "Slack", "zoom.exe": "Zoom", "winrar.exe": "WinRAR",
+    "zoom.exe": "Zoom", "telegram.exe": "Telegram",
+    "whatsapp.exe": "WhatsApp", "signal.exe": "Signal",
+    "skype.exe": "Skype", "mattermost.exe": "Mattermost",
+    "thunderbird.exe": "Thunderbird",
+    # Media & creativity
+    "spotify.exe": "Spotify", "vlc.exe": "VLC",
+    "obs64.exe": "OBS Studio", "obs32.exe": "OBS Studio",
+    "photoshop.exe": "Adobe Photoshop",
+    "illustrator.exe": "Adobe Illustrator",
+    "premiere.exe": "Adobe Premiere", "afterfx.exe": "Adobe After Effects",
+    "indesign.exe": "Adobe InDesign", "lightroom.exe": "Adobe Lightroom",
     "acrord32.exe": "Adobe Reader", "acrobat.exe": "Adobe Acrobat",
-    "photoshop.exe": "Photoshop", "illustrator.exe": "Illustrator",
-    "figma.exe": "Figma", "notion.exe": "Notion", "obsidian.exe": "Obsidian",
-    "zotero.exe": "Zotero", "telegram.exe": "Telegram",
-    "whatsapp.exe": "WhatsApp",
+    "figma.exe": "Figma", "sketch.exe": "Sketch",
+    "blender.exe": "Blender", "gimp-2.10.exe": "GIMP", "gimp.exe": "GIMP",
+    "inkscape.exe": "Inkscape", "audacity.exe": "Audacity",
+    "mpv.exe": "MPV Player", "mpc-hc64.exe": "MPC-HC",
+    # Productivity & notes
+    "notion.exe": "Notion", "obsidian.exe": "Obsidian",
+    "zotero.exe": "Zotero", "anki.exe": "Anki",
+    "logseq.exe": "Logseq", "roam.exe": "Roam Research",
+    "evernote.exe": "Evernote", "onenote.exe": "Microsoft OneNote",
+    "typora.exe": "Typora", "marktext.exe": "Mark Text",
+    # Terminals & utilities
+    "windowsterminal.exe": "Windows Terminal",
+    "wt.exe": "Windows Terminal",
+    "powershell.exe": "PowerShell", "pwsh.exe": "PowerShell",
+    "cmd.exe": "Command Prompt", "bash.exe": "Bash",
+    "wsl.exe": "WSL", "ubuntu.exe": "Ubuntu (WSL)",
+    "putty.exe": "PuTTY", "winscp.exe": "WinSCP",
+    "filezilla.exe": "FileZilla", "winrar.exe": "WinRAR",
+    "7zfm.exe": "7-Zip", "peazip.exe": "PeaZip",
+    # Games & other
+    "steam.exe": "Steam", "epicgameslauncher.exe": "Epic Games Launcher",
+    "goggalaxy.exe": "GOG Galaxy", "battle.net.exe": "Battle.net",
+    "leagueclient.exe": "League of Legends",
+    "riotclientservices.exe": "Riot Client",
+    "postman.exe": "Postman", "insomnia.exe": "Insomnia",
+    "docker desktop.exe": "Docker Desktop",
+    "virtualbox.exe": "VirtualBox", "vmware.exe": "VMware",
 }
+
+
+# ── App name resolution (hybrid: dictionary → file metadata → capitalized stem) ──
+
+_name_cache: dict = {}   # exe_path.lower() → resolved display name
+_icon_cache: dict = {}   # exe_path.lower() → PhotoImage (or None)
+
+def resolve_app_name(exe_path: str, fallback_name: str) -> str:
+    """Return the best human-readable name for an executable.
+
+    Priority:
+      1. FRIENDLY dict (exact basename match, no ext)
+      2. Win32 FileVersionInfo – ProductName, then FileDescription
+      3. Capitalized fallback_name stem
+    """
+    key = exe_path.lower() if exe_path else fallback_name.lower()
+    if key in _name_cache:
+        return _name_cache[key]
+
+    # 1. FRIENDLY dict — match on lowercase basename without extension
+    base = Path(exe_path).name.lower() if exe_path else fallback_name.lower()
+    stem = Path(base).stem  # e.g. "winword"
+    if base in FRIENDLY:
+        result = FRIENDLY[base]
+        _name_cache[key] = result
+        return result
+
+    # 2. Win32 file metadata
+    if _WIN32_AVAILABLE and exe_path and Path(exe_path).exists():
+        try:
+            info = win32api.GetFileVersionInfo(exe_path, "\\StringFileInfo\\040904B0\\ProductName")
+            if info and info.strip() and info.strip().lower() not in ("", stem):
+                result = info.strip()
+                _name_cache[key] = result
+                return result
+        except Exception:
+            pass
+        try:
+            info = win32api.GetFileVersionInfo(exe_path, "\\StringFileInfo\\040904B0\\FileDescription")
+            if info and info.strip() and info.strip().lower() not in ("", stem):
+                result = info.strip()
+                _name_cache[key] = result
+                return result
+        except Exception:
+            pass
+
+    # 3. Capitalize the process name stem
+    result = pretty_name(fallback_name)
+    _name_cache[key] = result
+    return result
+
+
+def get_window_title(exe_path: str) -> str | None:
+    """Return the foreground window title for a given exe path, or None."""
+    if not _WIN32_AVAILABLE or not exe_path:
+        return None
+    try:
+        target_exe = exe_path.lower()
+        result = []
+
+        def _cb(hwnd, _):
+            if not win32gui.IsWindowVisible(hwnd):
+                return
+            title = win32gui.GetWindowText(hwnd)
+            if not title:
+                return
+            try:
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                h = win32api.OpenProcess(win32con.PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+                path = win32process.GetModuleFileNameEx(h, 0).lower()
+                win32api.CloseHandle(h)
+                if path == target_exe and title not in result:
+                    result.append(title)
+            except Exception:
+                pass
+
+        win32gui.EnumWindows(_cb, None)
+        # Return shortest non-trivial title (avoids "Program Manager" etc.)
+        titles = [t for t in result if len(t) > 3]
+        return min(titles, key=len) if titles else None
+    except Exception:
+        return None
+
+
+def get_app_icon(exe_path: str, size: int = 24) -> object | None:
+    """Extract the icon from an exe and return a tkinter PhotoImage, or None."""
+    if not _WIN32_AVAILABLE or not exe_path:
+        return None
+    key = f"{exe_path.lower()}:{size}"
+    if key in _icon_cache:
+        return _icon_cache[key]
+    try:
+        large, small = win32gui.ExtractIconEx(exe_path, 0)
+        icons = large or small
+        if not icons:
+            _icon_cache[key] = None
+            return None
+        hicon = icons[0]
+        # Render the icon into a DIB
+        hdc = win32ui.CreateDCFromHandle(win32gui.GetDC(0))
+        hdc_mem = hdc.CreateCompatibleDC()
+        bmp = win32ui.CreateBitmap()
+        bmp.CreateCompatibleBitmap(hdc, size, size)
+        hdc_mem.SelectObject(bmp)
+        hdc_mem.FillSolidRect((0, 0, size, size), 0x3a2c1e)  # CARD background
+        win32gui.DrawIconEx(hdc_mem.GetSafeHdc(), 0, 0, hicon, size, size, 0, None, win32con.DI_NORMAL)
+        bmpinfo = bmp.GetInfo()
+        bmpstr  = bmp.GetBitmapBits(True)
+        img = _PILImage.frombuffer(
+            "RGBA", (bmpinfo["bmWidth"], bmpinfo["bmHeight"]),
+            bmpstr, "raw", "BGRA", 0, 1)
+        img = img.resize((size, size), _PILImage.LANCZOS)
+        # Convert to tkinter PhotoImage — must be done on main thread
+        import io, base64
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        import tkinter as _tk
+        photo = _tk.PhotoImage(data=base64.b64encode(buf.getvalue()))
+        # Cleanup
+        for h in (large or []) + (small or []):
+            try: win32gui.DestroyIcon(h)
+            except: pass
+        _icon_cache[key] = photo
+        return photo
+    except Exception:
+        _icon_cache[key] = None
+        return None
 
 ABORT_HOLD_SECONDS = 3.0
 NOTIFY_COOLDOWN_SECONDS = 30
@@ -892,36 +1123,59 @@ class FocusTimer:
         self.save_config()
         self._refresh_apps_list_sidebar()
 
+    # Browsers we know about, in detection priority order
+    KNOWN_BROWSERS = [
+        ("chrome.exe",  "Google Chrome"),
+        ("msedge.exe",  "Microsoft Edge"),
+        ("firefox.exe", "Mozilla Firefox"),
+        ("brave.exe",   "Brave"),
+        ("opera.exe",   "Opera"),
+        ("vivaldi.exe", "Vivaldi"),
+    ]
+
+    def _detect_running_browser(self):
+        """Return (exe_name, friendly_name) of the first known browser that is running."""
+        try:
+            running = {p.info["name"].lower() for p in psutil.process_iter(["name"])
+                       if p.info.get("name")}
+        except Exception:
+            running = set()
+        for exe, name in self.KNOWN_BROWSERS:
+            if exe in running:
+                return exe, name
+        return None, None
+
     def add_web(self):
         dialog = ctk.CTkInputDialog(
-            text="Enter a website domain or paste a full URL\n(e.g., toledo.kuleuven.be):", 
+            text="Enter a website domain or paste a full URL\n(e.g., toledo.kuleuven.be):",
             title="Allow Website"
         )
         domain_input = dialog.get_input()
         if not domain_input:
             return
-            
+
         domain_input = domain_input.strip().lower()
-        
-        if not domain_input.startswith(('http://', 'https://')):
-            domain_input = 'http://' + domain_input
-            
+        if not domain_input.startswith(("http://", "https://")):
+            domain_input = "http://" + domain_input
+
         parsed_url = urlparse(domain_input)
         clean_domain = parsed_url.netloc.replace("www.", "")
-        
+
         if clean_domain in self.whitelist:
             messagebox.showinfo("Already added", "That website is already on the list.")
             return
-            
+
         self.whitelist.append(clean_domain)
 
-        if "chrome.exe" not in self.whitelist:
-            self.whitelist.append("chrome.exe")
+        # Auto-add whichever browser is currently running (not just Chrome)
+        browser_exe, browser_name = self._detect_running_browser()
+        if browser_exe and browser_exe not in self.whitelist:
+            self.whitelist.append(browser_exe)
             messagebox.showinfo(
-                "Browser Auto-Added", 
-                "Google Chrome was automatically allowed so you can view this website."
+                "Browser Auto-Added",
+                f"{browser_name} was automatically allowed so you can view this website."
             )
-            
+
         self.save_config()
         self._refresh_apps_list_sidebar()
 
@@ -944,7 +1198,20 @@ class FocusTimer:
                 else:
                     store = name.lower()
                     key = name.lower()
-                running[key] = (pretty_name(name), store)
+
+                display_name = resolve_app_name(exe or "", name)
+
+                # Append window title if it adds useful context (e.g. "Visual Studio Code – project")
+                win_title = get_window_title(exe or "")
+                if win_title:
+                    # Strip the app name itself from the title to avoid "VS Code – VS Code"
+                    suffix = win_title
+                    if display_name.lower() in win_title.lower():
+                        suffix = win_title[win_title.lower().rfind(display_name.lower()) + len(display_name):].strip(" –-|·")
+                    if suffix and len(suffix) > 2:
+                        display_name = f"{display_name}  —  {suffix[:40]}"
+
+                running[key] = (display_name, store, exe or "")
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
             except Exception:
@@ -955,7 +1222,7 @@ class FocusTimer:
         self._show_running_picker(running)
 
     def _show_running_picker(self, running):
-        items = sorted(running.values(), key=lambda v: v[0].lower())
+        items = sorted(running.values(), key=lambda v: v[0].lower())  # (display_name, store_value, exe_path)
         win = ctk.CTkToplevel(self.root)
         win.title("Running apps")
         win.geometry("440x540")
@@ -987,24 +1254,51 @@ class FocusTimer:
                 c.destroy()
             ft = ft.strip().lower()
             shown = 0
-            for display_name, store_value in items:
+            for display_name, store_value, exe_path in items:
                 if ft and ft not in display_name.lower() \
                        and ft not in store_value.lower():
                     continue
                 shown += 1
                 row = ctk.CTkFrame(scroll, fg_color=CARD,
-                                   corner_radius=8, height=40)
+                                   corner_radius=8, height=52)
                 row.pack(fill="x", pady=3, padx=4)
                 row.pack_propagate(False)
-                av = make_avatar(row, display_name[:1],
-                                 avatar_color_for(display_name),
-                                 bg=CARD, size=24)
-                av.pack(side="left", padx=(10, 10))
-                lbl = ctk.CTkLabel(row, text=display_name,
-                                   font=("Segoe UI", 11), text_color=TEXT,
+
+                # ── Icon (real exe icon if win32 available, else letter avatar) ──
+                icon_img = get_app_icon(exe_path, size=32) if exe_path else None
+                if icon_img:
+                    icon_lbl = tk.Label(row, image=icon_img, bg=CARD,
+                                        borderwidth=0, highlightthickness=0)
+                    icon_lbl.image = icon_img  # keep reference
+                    icon_lbl.pack(side="left", padx=(10, 8))
+                else:
+                    av = make_avatar(row, display_name[:1],
+                                     avatar_color_for(display_name),
+                                     bg=CARD, size=32)
+                    av.pack(side="left", padx=(10, 8))
+                    icon_lbl = av
+
+                # ── Text column: bold name + muted exe hint ──
+                text_col = ctk.CTkFrame(row, fg_color="transparent")
+                text_col.pack(side="left", fill="x", expand=True)
+
+                # Split off the window-title suffix for display if present
+                base_name = display_name.split("  —  ")[0]
+                title_suffix = display_name[len(base_name):].lstrip()
+
+                lbl = ctk.CTkLabel(text_col, text=base_name,
+                                   font=("Segoe UI", 11, "bold"), text_color=TEXT,
                                    anchor="w")
-                lbl.pack(side="left", fill="x", expand=True)
-                for w in (row, lbl, av):
+                lbl.pack(fill="x")
+
+                exe_hint = Path(store_value).name if ("\\" in store_value or "/" in store_value) else store_value
+                subtitle = (title_suffix.lstrip("— ") or exe_hint)[:55]
+                hint_lbl = ctk.CTkLabel(text_col, text=subtitle,
+                                        font=("Segoe UI", 9), text_color=TEXT_MUTED,
+                                        anchor="w")
+                hint_lbl.pack(fill="x")
+
+                for w in (row, lbl, icon_lbl, text_col, hint_lbl):
                     w.bind("<Button-1>", lambda e, sv=store_value: pick(sv))
                 row.bind("<Enter>", lambda e, r=row: r.configure(fg_color=CARD_HOVER))
                 row.bind("<Leave>", lambda e, r=row: r.configure(fg_color=CARD))
@@ -1310,16 +1604,11 @@ class FocusTimer:
         if was_active and not aborted and self.session_total_seconds >= 10 * 60:
             today = date.today()
             if self.last_session_date == today:
-                pass
+                pass  # Already counted today, do nothing
             elif self.last_session_date and (today - self.last_session_date).days == 1:
-                self.streak += 1
+                self.streak += 1   # Consecutive day — extend streak
             else:
-                self.streak = 1 if self.streak == 0 else max(1, self.streak)
-                if not self.last_session_date or (today - self.last_session_date).days != 0:
-                    self.streak = (self.streak
-                                   if self.last_session_date and
-                                   (today - self.last_session_date).days <= 1
-                                   else 1)
+                self.streak = 1    # Gap of >1 day or first ever session — reset to 1
             self.last_session_date = today
 
         self.save_config()

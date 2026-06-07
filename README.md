@@ -34,10 +34,7 @@ Using Focus Timer requires two parts: the desktop app to manage your session, an
 * Run the application (no installation required).
 
 **2. The Chrome Extension**
-
-* Download the official **Study Lamp Focus Companion** directly from the [Chrome Web Store](https://www.google.com/search?q=%23) *(insert your store link here)*.
-* Pin the extension to your browser.
-* As soon as you start a focus session in the desktop app, the extension will automatically connect and enforce your website whitelist!
+* Coming soon
 
 ### 💻 For Developers (Running from Source)
 

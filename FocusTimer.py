@@ -23,6 +23,13 @@ except ImportError:
 import secrets
 import psutil
 
+try:
+    import requests as _requests
+    _REQUESTS_AVAILABLE = True
+except ImportError:
+    _REQUESTS_AVAILABLE = False
+    print("[backend] 'requests' not installed — backend sync disabled. Run: pip install requests")
+
 # Windows-specific: exe metadata, icons, window titles
 # Install with: pip install pywin32
 try:
@@ -258,8 +265,10 @@ FRIENDLY = {
     "virtualbox.exe": "VirtualBox", "vmware.exe": "VMware",
 }
 
-
-# ── App name resolution (hybrid: dictionary → file metadata → capitalized stem) ──
+BROWSER_EXES = frozenset({
+    "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe",
+    "opera.exe", "vivaldi.exe", "waterfox.exe", "librewolf.exe",
+})
 
 _name_cache: dict = {}   # exe_path.lower() → resolved display name
 _icon_cache: dict = {}   # exe_path.lower() → PhotoImage (or None)
@@ -512,6 +521,71 @@ class CircularProgress(tk.Canvas):
 
 
 
+class BackendSync:
+    _SYNC_INTERVAL = 30  # heartbeat every 30 s
+
+    def __init__(self, url: str, username: str, password: str):
+        self._url = url.rstrip("/")
+        self._username = username
+        self._password = password
+        self._token: str | None = None
+        self._authenticate()
+
+    def _authenticate(self) -> bool:
+        if not _REQUESTS_AVAILABLE:
+            return False
+        try:
+            r = _requests.post(f"{self._url}/api/auth/login",
+                               json={"username": self._username, "password": self._password},
+                               timeout=5)
+            if r.status_code == 200:
+                self._token = r.json().get("token")
+                return True
+        except Exception as e:
+            print(f"[backend] auth failed: {e}")
+        return False
+
+    def push(self, session_state: str, remaining_seconds: int,
+             total_seconds: int, xp_total: int):
+        if not _REQUESTS_AVAILABLE:
+            return
+        if not self._token and not self._authenticate():
+            return
+        try:
+            r = _requests.post(
+                f"{self._url}/api/focus/status",
+                headers={"Authorization": f"Bearer {self._token}"},
+                json={
+                    "sessionState": session_state,
+                    "remainingSeconds": remaining_seconds,
+                    "totalSeconds": total_seconds,
+                    "xpTotal": xp_total,
+                },
+                timeout=5,
+            )
+            if r.status_code == 401:
+                self._token = None
+        except Exception as e:
+            print(f"[backend] push failed: {e}")
+
+    def start_sync_loop(self, timer_ref):
+        def _loop():
+            while True:
+                time.sleep(self._SYNC_INTERVAL)
+                inst = timer_ref
+                if inst is None:
+                    continue
+                state = inst.session_state
+                if state == "active":
+                    remaining = max(0, int(inst.session_end_time - time.time()))
+                elif state == "paused":
+                    remaining = int(inst.paused_remaining or 0)
+                else:
+                    remaining = 0
+                self.push(state, remaining, inst.session_total_seconds, inst.xp_total)
+        threading.Thread(target=_loop, daemon=True).start()
+
+
 class FocusTimer:
     def __init__(self):
         ctk.set_appearance_mode("dark")
@@ -533,6 +607,9 @@ class FocusTimer:
         self.presets = [["25m", "pomodoro", 0, 25],
                         ["1h", "deep work", 1, 0],
                         ["2h", "marathon", 2, 0]]
+        self.backend_url = "https://focustimer-backend.onrender.com"
+        self.backend_username = ""
+        self.backend_password = ""
 
         self.session_state = "idle" 
         self.session_end_time = None
@@ -547,12 +624,18 @@ class FocusTimer:
         self.own_pid = os.getpid()
         self._ancestor_paths = set()
         self._ancestor_names = set()
+        self._minimized_hwnds: set[int] = set()
         self._abort_hold_start = None
         self._abort_after_id = None
         self._last_notified = {}
         self._active_toasts = []
 
         self.load_config()
+        self._backend_sync = None
+        if self.backend_username and self.backend_password:
+            self._backend_sync = BackendSync(
+                self.backend_url, self.backend_username, self.backend_password)
+            self._backend_sync.start_sync_loop(self)
         self._build_root_ui()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -569,6 +652,9 @@ class FocusTimer:
                 self.xp_total = int(data.get("xp_total", 0))
                 if "presets" in data:
                     self.presets = data["presets"]
+                self.backend_url = data.get("backend_url", "https://focustimer-backend.onrender.com")
+                self.backend_username = data.get("backend_username", "")
+                self.backend_password = data.get("backend_password", "")
                 lsd = data.get("last_session_date")
                 if lsd:
                     try:
@@ -594,6 +680,9 @@ class FocusTimer:
                     "last_session_date":
                         self.last_session_date.isoformat()
                         if self.last_session_date else None,
+                    "backend_url": self.backend_url,
+                    "backend_username": self.backend_username,
+                    "backend_password": self.backend_password,
                 }, f, indent=2)
         except Exception as e:
             messagebox.showerror("Config error", f"Could not save config:\n{e}")
@@ -1414,6 +1503,7 @@ class FocusTimer:
         self._show_session()
         self._auto_launch_allowed()
         threading.Thread(target=self._monitor_loop, daemon=True).start()
+        self._backend_push()
         self._tick_session()
 
     def _toggle_pause(self):
@@ -1423,6 +1513,8 @@ class FocusTimer:
             self.pause_button.configure(text="▶  Resume")
             self.sess_status.configure(
                 text="paused — take a breath", text_color=TEXT_DIM)
+            self._restore_minimized_windows()
+            self._backend_push()
         elif self.session_state == "paused":
             self.session_state = "active"
             self.session_end_time = time.time() + (self.paused_remaining or 0)
@@ -1430,6 +1522,7 @@ class FocusTimer:
             self.pause_button.configure(text="❚❚  Pause")
             self.sess_status.configure(
                 text="you're in the zone — keep going", text_color=TEXT_DIM)
+            self._backend_push()
             self._tick_session()
 
     def _abort_press(self, _event=None):
@@ -1519,7 +1612,50 @@ class FocusTimer:
             return True
         if name_lower in self.whitelist:
             return True
+        # Auto-allow any browser when at least one domain is whitelisted
+        if name_lower in BROWSER_EXES and any(
+            "\\" not in e and "/" not in e and "." in e for e in self.whitelist
+        ):
+            return True
         return False
+
+    def _minimize_proc_windows(self, pid: int, proc_name: str):
+        """Minimize all visible top-level windows for a process and track for restore."""
+        if not _WIN32_AVAILABLE:
+            return
+        try:
+            user32 = ctypes.windll.user32
+            def _cb(hwnd, _):
+                if not win32gui.IsWindowVisible(hwnd):
+                    return
+                try:
+                    _, wpid = win32process.GetWindowThreadProcessId(hwnd)
+                    if wpid == pid:
+                        user32.ShowWindow(hwnd, 6)  # SW_MINIMIZE
+                        self._minimized_hwnds.add(hwnd)
+                except Exception:
+                    pass
+            win32gui.EnumWindows(_cb, None)
+            self._notify(f"{pretty_name(proc_name)} minimized — come back to focus", key=proc_name)
+        except Exception:
+            pass
+
+    def _restore_minimized_windows(self):
+        """Restore all windows that were minimized by the focus shield."""
+        if not _WIN32_AVAILABLE or not self._minimized_hwnds:
+            self._minimized_hwnds.clear()
+            return
+        try:
+            user32 = ctypes.windll.user32
+            for hwnd in list(self._minimized_hwnds):
+                try:
+                    if win32gui.IsWindow(hwnd):
+                        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        self._minimized_hwnds.clear()
 
     def _strict_pass(self):
         for proc in psutil.process_iter(["pid", "name", "exe"]):
@@ -1530,8 +1666,7 @@ class FocusTimer:
                 exe = info.get("exe")
                 exe_lower = exe.lower().replace("/", "\\") if exe else None
                 if self._is_allowed(name, exe_lower): continue
-                proc.kill()
-                self._notify(f"Closed {pretty_name(name)}", key=name)
+                self._minimize_proc_windows(info["pid"], name)
             except (psutil.NoSuchProcess, psutil.AccessDenied): continue
             except Exception: continue
 
@@ -1551,7 +1686,8 @@ class FocusTimer:
             exe_lower = exe.lower().replace("/", "\\") if exe else None
             if pid.value == self.own_pid: return
             if self._is_allowed(name, exe_lower): return
-            user32.ShowWindow(hwnd, 6)
+            user32.ShowWindow(hwnd, 6)  # SW_MINIMIZE
+            self._minimized_hwnds.add(hwnd)
             self._notify(f"{pretty_name(name)} minimized — come back to focus", key=name)
         except (psutil.NoSuchProcess, psutil.AccessDenied): return
 
@@ -1600,6 +1736,7 @@ class FocusTimer:
         self.session_state = "idle"
         self.session_end_time = None
         self._abort_hold_start = None
+        self._restore_minimized_windows()
 
         if was_active and not aborted and self.session_total_seconds >= 10 * 60:
             today = date.today()
@@ -1612,6 +1749,7 @@ class FocusTimer:
             self.last_session_date = today
 
         self.save_config()
+        self._backend_push()
         self._set_controls_state(True)
         self._show_setup()
         if not aborted:
@@ -1619,6 +1757,22 @@ class FocusTimer:
         self.session_xp_earned = 0
         self.giveup_button.configure(text="Give up")
         self.pause_button.configure(text="❚❚  Pause")
+
+    def _backend_push(self):
+        if self._backend_sync is None:
+            return
+        state = self.session_state
+        if state == "active":
+            remaining = max(0, int(self.session_end_time - time.time()))
+        elif state == "paused":
+            remaining = int(self.paused_remaining or 0)
+        else:
+            remaining = 0
+        threading.Thread(
+            target=self._backend_sync.push,
+            args=(state, remaining, self.session_total_seconds, self.xp_total),
+            daemon=True,
+        ).start()
 
     def _on_close(self):
         if self.session_state in ("active", "paused"):

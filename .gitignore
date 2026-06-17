@@ -1,0 +1,36 @@
+# Compiled binaries
+*.exe
+
+# Node dependencies
+app/node_modules/
+
+# Electron-vite build outputs
+app/out/
+app/build/
+app/dist/
+app/dist-build/
+
+# Bundled sidecar binary (compiled from FocusTimerSidecar.py)
+app/resources/
+
+# TypeScript incremental build info
+app/*.tsbuildinfo
+
+# Chrome extension (source folder + packaged zip)
+focus-timer-extension/
+focus-timer-extension.zip
+
+# Release builds
+release/
+
+# Generated store assets (large PNGs)
+store-assets/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# OS files
+.DS_Store
+Thumbs.db

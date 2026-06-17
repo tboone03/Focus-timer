@@ -1,0 +1,763 @@
+/* ==============================================================
+   COZY STUDY ROOM — design system for Focus Timer
+   Warm walnut desk, amber lamplight, paper panels.
+   ============================================================== */
+
+:root {
+  /* walnut desk */
+  --wood-edge: oklch(0.13 0.018 55);
+  --wood-0:    oklch(0.165 0.022 52);
+  --wood-1:    oklch(0.205 0.028 50);
+  --wood-2:    oklch(0.245 0.032 48);
+
+  /* lamp light */
+  --amber:      oklch(0.80 0.135 72);
+  --amber-deep: oklch(0.68 0.14 60);
+  --honey:      oklch(0.84 0.12 80);
+  --glow-strength: 0.85;
+
+  /* paper panels */
+  --parchment:   oklch(0.905 0.028 84);
+  --parchment-2: oklch(0.945 0.022 88);
+  --ink:         oklch(0.32 0.026 58);
+  --ink-soft:    oklch(0.46 0.022 60);
+
+  /* on-dark text */
+  --cream:       oklch(0.90 0.03 82);
+  --cream-dim:   oklch(0.72 0.028 74);
+  --cream-faint: oklch(0.56 0.024 66);
+
+  /* status */
+  --sage:      oklch(0.78 0.085 152);
+  --sage-deep: oklch(0.66 0.09 150);
+
+  /* typography */
+  --serif: 'Spectral', Georgia, serif;
+  --mono:  'JetBrains Mono', ui-monospace, monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+
+body {
+  font-family: var(--serif);
+  background: var(--wood-edge);
+  color: var(--cream);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+/* ─── titlebar drag region ─── */
+.titlebar-drag {
+  height: 32px;
+  -webkit-app-region: drag;
+  flex-shrink: 0;
+}
+
+/* ─── app grid ─── */
+#app {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(400px, 1.5fr) minmax(260px, 1fr);
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    "brand  brand   clock"
+    "board  timer   friends"
+    "board  ambiance friends";
+  gap: clamp(14px, 2vw, 32px);
+  align-items: stretch;
+  padding: clamp(14px, 2vw, 28px) clamp(18px, 3vw, 44px) clamp(14px, 2vw, 28px);
+  max-width: 1440px;
+  margin: 0 auto;
+  height: calc(100vh - 32px);
+}
+
+/* ─── brand ─── */
+.brand {
+  grid-area: brand;
+  align-self: start;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.brand .mark {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  background: radial-gradient(circle at 35% 30%, var(--honey), var(--amber-deep));
+  box-shadow: 0 0 14px color-mix(in oklab, var(--amber) calc(75% * var(--glow-strength)), transparent);
+}
+.brand h1 {
+  font-weight: 500; font-size: clamp(13px, 1.1vw, 17px);
+  letter-spacing: 0.42em; text-transform: uppercase;
+  color: var(--cream); padding-left: 2px; font-family: var(--mono);
+}
+.brand .sub {
+  font-size: 11px; letter-spacing: 0.34em; text-transform: uppercase;
+  color: var(--cream-faint); font-family: var(--mono); font-weight: 300;
+}
+.brand-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ─── clock ─── */
+.clock { grid-area: clock; justify-self: end; text-align: right; align-self: start; }
+.clock .time {
+  font-family: var(--mono); font-weight: 300;
+  font-size: clamp(16px, 1.5vw, 22px);
+  color: var(--cream-dim); letter-spacing: 0.04em;
+}
+.clock .date {
+  font-size: 11.5px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--cream-faint); margin-top: 3px;
+}
+
+/* ─── main timer ─── */
+.timer {
+  grid-area: timer;
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center;
+  gap: clamp(10px, 1.6vh, 20px);
+  position: relative;
+}
+
+.mode-tabs {
+  display: flex; gap: 5px; padding: 4px;
+  border-radius: 100px;
+  background: color-mix(in oklab, var(--wood-edge) 70%, black);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.6), 0 1px 0 rgba(255,210,150,0.04);
+}
+.mode-tabs button {
+  font-family: var(--mono);
+  font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase;
+  padding: 7px 16px; border-radius: 100px; color: var(--cream-faint);
+  background: transparent; border: none; cursor: pointer;
+  transition: color .3s, background .3s; font-weight: 500;
+}
+.mode-tabs button.on {
+  color: var(--wood-edge);
+  background: linear-gradient(180deg, var(--honey), var(--amber-deep));
+  box-shadow: 0 2px 8px color-mix(in oklab, var(--amber) calc(45% * var(--glow-strength)), transparent),
+              inset 0 1px 0 rgba(255,255,255,0.35);
+}
+
+/* ─── SVG dial ─── */
+.dial {
+  position: relative;
+  width: clamp(280px, 30vw, 400px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+}
+.dial::before {
+  content: "";
+  position: absolute; inset: 13%; border-radius: 50%;
+  background: radial-gradient(circle at 50% 42%,
+    color-mix(in oklab, var(--amber) calc(18% * var(--glow-strength)), transparent) 0%,
+    color-mix(in oklab, var(--amber-deep) calc(7% * var(--glow-strength)), transparent) 42%,
+    transparent 72%);
+  box-shadow: inset 0 0 60px color-mix(in oklab, black 30%, transparent);
+}
+.dial svg {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  transform: rotate(-90deg); overflow: visible;
+}
+.dial .track { fill: none; stroke: color-mix(in oklab, var(--wood-edge) 60%, black); stroke-width: 6; }
+.dial .ticks line { stroke: var(--cream-faint); opacity: 0.4; }
+.dial .progress {
+  fill: none; stroke: url(#amberGrad); stroke-width: 7; stroke-linecap: round;
+  filter: drop-shadow(0 0 7px color-mix(in oklab, var(--amber) calc(70% * var(--glow-strength)), transparent));
+  transition: stroke-dashoffset .85s linear;
+}
+.dial-face {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 5px; z-index: 2; text-align: center;
+}
+.session-label {
+  font-family: var(--mono);
+  font-size: 12px; letter-spacing: 0.32em; text-transform: uppercase;
+  color: var(--amber); font-weight: 400;
+}
+.readout {
+  font-family: var(--mono); font-weight: 300;
+  font-size: clamp(48px, 6.5vw, 82px);
+  letter-spacing: 0.01em; line-height: 1; color: var(--cream);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 30px color-mix(in oklab, var(--amber) calc(28% * var(--glow-strength)), transparent);
+}
+.readout.done { color: var(--amber); }
+.session-meta {
+  font-size: 12.5px; letter-spacing: 0.04em;
+  color: var(--cream-faint); font-style: italic;
+}
+
+/* pomodoro beads */
+.beads { display: flex; gap: 7px; margin-top: 2px; }
+.beads i {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: color-mix(in oklab, var(--cream-faint) 35%, transparent);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4);
+  display: block;
+}
+.beads i.full {
+  background: radial-gradient(circle at 35% 30%, var(--honey), var(--amber-deep));
+  box-shadow: 0 0 9px color-mix(in oklab, var(--amber) calc(70% * var(--glow-strength)), transparent);
+}
+
+/* ─── controls ─── */
+.controls {
+  display: flex; align-items: center;
+  gap: clamp(14px, 1.8vw, 26px);
+}
+.brass {
+  display: grid; place-items: center; border-radius: 50%;
+  background: linear-gradient(160deg, oklch(0.62 0.07 78), oklch(0.42 0.06 62));
+  box-shadow: 0 6px 16px rgba(0,0,0,0.5),
+              inset 0 2px 2px rgba(255,240,210,0.45),
+              inset 0 -3px 5px rgba(0,0,0,0.4);
+  color: var(--wood-edge);
+  transition: transform .12s, box-shadow .2s;
+  border: none; cursor: pointer;
+}
+.brass:active {
+  transform: translateY(2px) scale(0.97);
+  box-shadow: 0 2px 7px rgba(0,0,0,0.5),
+              inset 0 2px 2px rgba(255,240,210,0.4),
+              inset 0 -2px 4px rgba(0,0,0,0.4);
+}
+.brass.primary {
+  width: clamp(62px, 6.5vw, 80px);
+  height: clamp(62px, 6.5vw, 80px);
+}
+.brass.primary.running {
+  background: linear-gradient(160deg, var(--honey), var(--amber-deep));
+  box-shadow: 0 6px 22px color-mix(in oklab, var(--amber) calc(50% * var(--glow-strength)), transparent),
+              inset 0 2px 2px rgba(255,255,255,0.5),
+              inset 0 -3px 5px rgba(0,0,0,0.3);
+}
+.brass.ghost {
+  width: 48px; height: 48px;
+  background: linear-gradient(160deg, var(--wood-2), var(--wood-0));
+  box-shadow: 0 4px 11px rgba(0,0,0,0.5),
+              inset 0 1px 1px rgba(255,210,150,0.12),
+              inset 0 -2px 4px rgba(0,0,0,0.5);
+  color: var(--cream-dim);
+}
+.brass.ghost.danger-held {
+  background: linear-gradient(160deg, oklch(0.52 0.15 22), oklch(0.38 0.13 18));
+  color: #fff;
+}
+.brass svg { width: 42%; height: 42%; }
+
+/* ─── preset buttons ─── */
+.presets { display: flex; gap: 8px; }
+.presets button {
+  font-family: var(--mono); font-size: 12px; font-weight: 400;
+  letter-spacing: 0.05em;
+  padding: 7px 14px; border-radius: 100px; color: var(--cream-faint);
+  border: 1px solid color-mix(in oklab, var(--cream-faint) 22%, transparent);
+  background: transparent; cursor: pointer;
+  transition: all .25s;
+}
+.presets button:hover {
+  color: var(--cream-dim);
+  border-color: color-mix(in oklab, var(--amber) 40%, transparent);
+}
+.presets button.on {
+  color: var(--amber);
+  border-color: color-mix(in oklab, var(--amber) 60%, transparent);
+  background: color-mix(in oklab, var(--amber) calc(10% * var(--glow-strength)), transparent);
+}
+
+/* ─── mode toggle ─── */
+.mode-row {
+  display: flex; gap: 6px; align-items: center;
+}
+.mode-btn {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 5px 13px; border-radius: 100px;
+  background: transparent; cursor: pointer;
+  border: 1px solid color-mix(in oklab, var(--cream-faint) 18%, transparent);
+  color: var(--cream-faint);
+  transition: all .22s;
+}
+.mode-btn.on {
+  background: color-mix(in oklab, var(--amber) calc(12% * var(--glow-strength)), transparent);
+  border-color: color-mix(in oklab, var(--amber) 50%, transparent);
+  color: var(--amber);
+}
+.mode-sep {
+  font-family: var(--mono); font-size: 10px;
+  color: var(--cream-faint); opacity: 0.5;
+}
+
+/* ─── paper panels ─── */
+.paper {
+  position: relative; border-radius: 4px;
+  background: linear-gradient(180deg, var(--parchment-2), var(--parchment));
+  color: var(--ink);
+  box-shadow: 0 18px 40px rgba(0,0,0,0.45),
+              0 3px 8px rgba(0,0,0,0.3),
+              inset 0 1px 0 rgba(255,255,255,0.6);
+  padding: clamp(14px, 1.4vw, 22px);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.paper::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  opacity: 0.45; mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23p)' opacity='0.04'/%3E%3C/svg%3E");
+}
+.paper > * { position: relative; z-index: 1; }
+.paper-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 13px; padding-bottom: 11px;
+  border-bottom: 1px solid color-mix(in oklab, var(--ink) 18%, transparent);
+}
+.paper-head h2 {
+  font-weight: 600; font-size: clamp(15px, 1.2vw, 18px);
+  letter-spacing: 0.01em; color: var(--ink); white-space: nowrap;
+}
+.paper-head .tag {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--ink-soft);
+  display: flex; align-items: center; gap: 5px;
+}
+.paper-head .tag .mark {
+  width: 7px; height: 7px; border-radius: 50%; display: inline-block;
+}
+.paper-link {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em;
+  text-transform: uppercase; color: var(--ink-soft);
+  cursor: pointer; border: none; background: none; padding: 0;
+  transition: color .2s;
+  margin-top: auto; padding-top: 11px;
+  border-top: 1px solid color-mix(in oklab, var(--ink) 12%, transparent);
+}
+.paper-link:hover { color: var(--ink); }
+
+/* ─── leaderboard ─── */
+.board { grid-area: board; align-self: stretch; }
+.lboard { display: flex; flex-direction: column; overflow-y: auto; flex: 1; }
+.lrow {
+  display: grid;
+  grid-template-columns: 22px 34px 1fr auto;
+  align-items: center; gap: 10px;
+  padding: 9px 3px;
+  border-bottom: 1px dotted color-mix(in oklab, var(--ink) 15%, transparent);
+}
+.lrow:last-child { border-bottom: none; }
+.lrow.you {
+  margin: 3px -8px; padding: 9px 11px; border-radius: 4px;
+  background: color-mix(in oklab, var(--amber) 16%, var(--parchment));
+  border-bottom: none;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--amber-deep) 35%, transparent);
+}
+.rank {
+  font-family: var(--mono); font-size: 14px; font-weight: 500;
+  color: var(--ink-soft); text-align: center;
+}
+.rank.medal { color: var(--amber-deep); font-weight: 600; }
+.lava {
+  width: 30px; height: 30px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-weight: 600; font-size: 12px;
+  color: oklch(0.97 0.01 85);
+  box-shadow: inset 0 1px 1px rgba(255,255,255,0.4);
+}
+.lname { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.lname b { font-weight: 600; font-size: 14px; color: var(--ink); }
+.lname .lhrs { font-size: 10.5px; color: var(--ink-soft); font-family: var(--mono); letter-spacing: 0.02em; }
+.lxp { text-align: right; }
+.lxp b { font-family: var(--mono); font-weight: 500; font-size: 15px; color: var(--ink); }
+.lxp span { display: block; font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-soft); margin-top: 1px; }
+
+/* ─── friends panel ─── */
+.friends { grid-area: friends; align-self: stretch; }
+.flist { display: flex; flex-direction: column; gap: 3px; overflow-y: auto; flex: 1; }
+.frow {
+  display: flex; align-items: center; gap: 11px;
+  padding: 9px 4px;
+  border-bottom: 1px dotted color-mix(in oklab, var(--ink) 15%, transparent);
+}
+.frow:last-child { border-bottom: none; }
+.avatar {
+  position: relative; width: 38px; height: 38px; border-radius: 50%;
+  display: grid; place-items: center; flex-shrink: 0;
+  font-family: var(--serif); font-weight: 600; font-size: 15px;
+  color: oklch(0.97 0.01 85);
+  box-shadow: inset 0 1px 1px rgba(255,255,255,0.4), 0 1px 3px rgba(0,0,0,0.25);
+}
+.avatar .pulse {
+  position: absolute; right: -1px; bottom: -1px;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--sage); border: 2.5px solid var(--parchment-2);
+}
+.avatar .pulse::before {
+  content: ""; position: absolute; inset: -3px; border-radius: 50%;
+  background: var(--sage); opacity: 0.5;
+  animation: ping 2.4s ease-out infinite;
+}
+@keyframes ping {
+  0% { transform: scale(0.6); opacity: 0.6; }
+  70%, 100% { transform: scale(2.1); opacity: 0; }
+}
+.fmeta { flex: 1; min-width: 0; }
+.fmeta .fname { font-weight: 600; font-size: 14px; color: var(--ink); }
+.fmeta .ftask {
+  font-size: 12px; color: var(--ink-soft); font-style: italic;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.felapsed {
+  font-family: var(--mono); font-size: 12px; font-weight: 400;
+  color: var(--ink); font-variant-numeric: tabular-nums; text-align: right;
+}
+.felapsed span {
+  display: block; font-size: 9px; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--sage-deep); margin-top: 2px;
+}
+.friends-foot {
+  margin-top: 12px; padding-top: 11px;
+  border-top: 1px solid color-mix(in oklab, var(--ink) 18%, transparent);
+  font-size: 12px; color: var(--ink-soft); font-style: italic; text-align: center;
+}
+
+/* ─── ambiance ─── */
+.ambiance {
+  grid-area: ambiance;
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 clamp(6px, 1vw, 16px);
+}
+.ambiance .lab {
+  font-size: 10px; letter-spacing: 0.26em; text-transform: uppercase;
+  color: var(--cream-faint); font-family: var(--mono); white-space: nowrap;
+}
+.dimmer {
+  -webkit-appearance: none; appearance: none;
+  flex: 1; height: 3px; border-radius: 4px;
+  background: linear-gradient(90deg, var(--amber-deep), color-mix(in oklab, var(--cream-faint) 30%, transparent));
+  outline: none;
+}
+.dimmer::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--honey), var(--amber-deep));
+  box-shadow: 0 0 10px color-mix(in oklab, var(--amber) 70%, transparent),
+              inset 0 1px 1px rgba(255,255,255,0.5);
+  cursor: grab;
+}
+.dimmer::-moz-range-thumb {
+  width: 16px; height: 16px; border: none; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--honey), var(--amber-deep));
+  box-shadow: 0 0 10px color-mix(in oklab, var(--amber) 70%, transparent);
+  cursor: grab;
+}
+
+/* ─── connection status pill ─── */
+.conn-pill {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 4px 11px; border-radius: 100px;
+  border: 1px solid color-mix(in oklab, var(--cream-faint) 15%, transparent);
+  background: transparent;
+  color: var(--cream-faint);
+}
+.conn-pill .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--cream-faint); flex-shrink: 0;
+}
+.conn-pill.on { color: var(--sage); border-color: color-mix(in oklab, var(--sage) 35%, transparent); }
+.conn-pill.on .dot { background: var(--sage); box-shadow: 0 0 6px var(--sage); }
+
+/* ─── ghost nav button ─── */
+.ghost-btn {
+  display: flex; align-items: center; gap: 5px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 5px 12px; border-radius: 100px; cursor: pointer;
+  background: transparent;
+  border: 1px solid color-mix(in oklab, var(--cream-faint) 15%, transparent);
+  color: var(--cream-faint);
+  transition: all .2s;
+}
+.ghost-btn:hover {
+  color: var(--cream-dim);
+  border-color: color-mix(in oklab, var(--cream-faint) 30%, transparent);
+}
+.ghost-btn svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ─── shield / allowlist bar ─── */
+.shield {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; border-radius: 14px;
+  background: color-mix(in oklab, var(--wood-1) 80%, transparent);
+  border: 1px solid color-mix(in oklab, var(--cream-faint) 14%, transparent);
+  flex-wrap: wrap;
+  transition: border-color .3s;
+  width: 100%; max-width: 480px;
+}
+.shield.active {
+  border-color: color-mix(in oklab, var(--amber) 35%, transparent);
+}
+.shield-chips { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; flex: 1; }
+.achip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 8px 4px 5px; border-radius: 20px;
+  border: 1px solid color-mix(in oklab, var(--cream-faint) 15%, transparent);
+  background: color-mix(in oklab, var(--wood-edge) 50%, transparent);
+  font-size: 12px; color: var(--cream-dim);
+}
+.achip .ic {
+  width: 20px; height: 20px; border-radius: 5px;
+  display: grid; place-items: center;
+  font-size: 11px; font-weight: 700; font-family: var(--serif);
+  color: #1a130b; flex-shrink: 0;
+}
+.achip .x {
+  cursor: pointer; color: var(--cream-faint);
+  font-family: var(--mono); font-size: 12px;
+  padding: 0 2px; transition: color .2s;
+  background: none; border: none;
+  line-height: 1;
+}
+.achip .x:hover { color: oklch(0.6 0.12 22); }
+.add-allow-btn {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em;
+  color: var(--amber); background: transparent;
+  border: 1px dashed color-mix(in oklab, var(--amber) 50%, transparent);
+  border-radius: 20px; padding: 6px 12px; cursor: pointer;
+  transition: all .2s; white-space: nowrap; flex-shrink: 0;
+}
+.add-allow-btn:hover {
+  color: var(--honey); border-color: var(--amber);
+}
+.shield-state {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--cream-faint);
+  display: flex; align-items: center; gap: 7px; flex-shrink: 0;
+}
+.shield-state .lock {
+  width: 8px; height: 8px; border-radius: 2px;
+  background: var(--cream-faint); transition: all .3s;
+}
+.shield.active .shield-state { color: var(--honey); }
+.shield.active .shield-state .lock {
+  background: var(--honey);
+  box-shadow: 0 0 8px var(--honey);
+}
+
+/* ─── modal ─── */
+.modal-scrim {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(8,6,3,0.72); backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.modal {
+  width: 100%; max-width: 520px; max-height: 86vh;
+  display: flex; flex-direction: column;
+  background: linear-gradient(180deg, oklch(0.19 0.022 52), oklch(0.14 0.018 50));
+  border: 1px solid color-mix(in oklab, var(--amber) 28%, transparent);
+  border-radius: 20px;
+  box-shadow: 0 28px 60px rgba(0,0,0,0.8), inset 0 1px 0 rgba(255,222,170,0.08);
+  overflow: hidden;
+  animation: modalpop .26s cubic-bezier(.2,.8,.25,1) both;
+}
+@keyframes modalpop {
+  from { transform: translateY(12px) scale(.988); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+.modal-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  padding: 22px 22px 0;
+}
+.modal-eyebrow {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.3em;
+  text-transform: uppercase; color: var(--amber); margin-bottom: 7px;
+}
+.modal-title {
+  font-size: 24px; font-weight: 600;
+  line-height: 1; color: var(--cream);
+}
+.modal-close {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 1px solid color-mix(in oklab, var(--cream-faint) 15%, transparent);
+  background: color-mix(in oklab, var(--wood-edge) 50%, transparent);
+  color: var(--cream-dim); font-size: 17px; cursor: pointer;
+  display: grid; place-items: center; flex-shrink: 0;
+  transition: all .2s;
+}
+.modal-close:hover { color: var(--cream); }
+.modal-seg {
+  display: flex; gap: 5px; padding: 4px;
+  border-radius: 28px;
+  background: rgba(20,15,9,0.5);
+  border: 1px solid color-mix(in oklab, var(--cream-faint) 10%, transparent);
+  margin: 16px 22px 4px;
+}
+.modal-seg button {
+  flex: 1; font-family: var(--mono); font-size: 10px; letter-spacing: 0.15em;
+  text-transform: uppercase; color: var(--cream-faint);
+  background: transparent; border: none; border-radius: 22px;
+  padding: 10px; cursor: pointer; transition: all .22s;
+}
+.modal-seg button.on {
+  color: #231809;
+  background: linear-gradient(180deg, var(--honey), var(--amber-deep));
+  box-shadow: 0 5px 14px -7px rgba(240,169,78,0.8);
+}
+.modal-body { padding: 8px 22px 4px; overflow: auto; flex: 1; }
+.modal-search {
+  width: 100%;
+  font-family: var(--serif); font-size: 14px; color: var(--cream);
+  background: rgba(20,15,9,0.6);
+  border: 1px solid color-mix(in oklab, var(--cream-faint) 12%, transparent);
+  border-radius: 10px; padding: 11px 14px; outline: none;
+  margin-bottom: 10px; display: block;
+  transition: border .2s;
+}
+.modal-search::placeholder { color: var(--cream-faint); }
+.modal-search:focus { border-color: color-mix(in oklab, var(--amber) 35%, transparent); }
+.applist {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 40vh; overflow-y: auto; padding: 2px;
+}
+.approw {
+  display: flex; align-items: center; gap: 11px;
+  padding: 10px 12px; border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--cream-faint) 10%, transparent);
+  background: rgba(28,21,12,0.45);
+  cursor: pointer; transition: all .18s;
+}
+.approw:hover { border-color: color-mix(in oklab, var(--amber) 30%, transparent); background: rgba(40,30,17,0.5); }
+.approw.on { border-color: color-mix(in oklab, var(--amber) 45%, transparent); background: rgba(240,169,78,0.10); }
+.appicon {
+  width: 36px; height: 36px; border-radius: 10px;
+  display: grid; place-items: center;
+  font-family: var(--serif); font-weight: 700; font-size: 16px;
+  color: #1a130b; flex-shrink: 0;
+}
+.approw .appmeta { flex: 1; min-width: 0; }
+.approw .appmeta .anm { font-size: 15px; font-weight: 600; color: var(--cream); }
+.approw .appmeta .asub {
+  font-family: var(--mono); font-size: 9.5px; color: var(--cream-faint);
+  letter-spacing: 0.04em; margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.appcheck {
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 1.5px solid color-mix(in oklab, var(--cream-faint) 20%, transparent);
+  flex-shrink: 0; display: grid; place-items: center; transition: all .18s;
+}
+.approw.on .appcheck {
+  background: var(--amber);
+  border-color: var(--amber);
+  box-shadow: 0 0 9px rgba(240,169,78,0.6);
+}
+.siteform { display: flex; gap: 9px; margin-bottom: 12px; }
+.siteform input {
+  flex: 1; font-family: var(--serif); font-size: 14px; color: var(--cream);
+  background: rgba(20,15,9,0.6);
+  border: 1px solid color-mix(in oklab, var(--cream-faint) 12%, transparent);
+  border-radius: 10px; padding: 11px 14px; outline: none;
+  transition: border .2s;
+}
+.siteform input::placeholder { color: var(--cream-faint); }
+.siteform input:focus { border-color: color-mix(in oklab, var(--amber) 35%, transparent); }
+.siteform .add-site-btn {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em;
+  text-transform: uppercase; font-weight: 600;
+  color: #231809; padding: 11px 20px; border-radius: 10px; border: none;
+  cursor: pointer;
+  background: linear-gradient(180deg, var(--honey), var(--amber-deep));
+  box-shadow: 0 8px 18px -10px rgba(240,169,78,0.85);
+  transition: filter .2s; white-space: nowrap; flex-shrink: 0;
+}
+.siteform .add-site-btn:hover { filter: brightness(1.07); }
+.sitelist { display: flex; flex-direction: column; gap: 6px; max-height: 38vh; overflow-y: auto; }
+.siterow {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 13px; border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--cream-faint) 10%, transparent);
+  background: rgba(28,21,12,0.4);
+}
+.siterow .sdom { flex: 1; font-family: var(--mono); font-size: 13px; color: var(--cream); word-break: break-all; }
+.siterow .srm {
+  cursor: pointer; color: var(--cream-faint);
+  font-size: 16px; padding: 0 3px; transition: color .2s;
+  background: none; border: none; font-family: var(--mono);
+}
+.siterow .srm:hover { color: oklch(0.6 0.12 22); }
+.site-empty { font-style: italic; color: var(--cream-faint); font-size: 13px; padding: 20px 4px; text-align: center; }
+.modal-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 22px; border-top: 1px solid color-mix(in oklab, var(--cream-faint) 8%, transparent);
+}
+.modal-foot .cnt {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.15em;
+  text-transform: uppercase; color: var(--cream-faint);
+}
+.modal-done-btn {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.15em;
+  text-transform: uppercase; font-weight: 600;
+  color: #231809; padding: 10px 20px; border-radius: 100px; border: none;
+  cursor: pointer;
+  background: linear-gradient(180deg, var(--honey), var(--amber-deep));
+  box-shadow: 0 6px 14px -8px rgba(240,169,78,0.85);
+  transition: filter .2s;
+}
+.modal-done-btn:hover { filter: brightness(1.07); }
+
+/* ─── custom duration stepper ─── */
+.custom-dur {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-size: 12px; color: var(--cream-faint);
+}
+.custom-dur input {
+  width: 44px; text-align: center;
+  background: color-mix(in oklab, var(--wood-edge) 70%, transparent);
+  border: 1px solid color-mix(in oklab, var(--cream-faint) 14%, transparent);
+  border-radius: 7px; padding: 6px 4px;
+  font-family: var(--mono); font-size: 14px; color: var(--cream);
+  outline: none; transition: border .2s;
+}
+.custom-dur input:focus { border-color: color-mix(in oklab, var(--amber) 40%, transparent); }
+.custom-dur .lbl { font-size: 11px; color: var(--cream-faint); opacity: 0.7; }
+
+/* ─── scrollbars in paper panels ─── */
+.flist::-webkit-scrollbar,
+.lboard::-webkit-scrollbar,
+.applist::-webkit-scrollbar,
+.sitelist::-webkit-scrollbar { width: 4px; }
+.flist::-webkit-scrollbar-thumb,
+.lboard::-webkit-scrollbar-thumb,
+.applist::-webkit-scrollbar-thumb,
+.sitelist::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--ink) 25%, transparent);
+  border-radius: 4px;
+}
+
+/* ─── tone gradients (used for avatars) ─── */
+.tone-rose   { background: linear-gradient(150deg, oklch(0.66 0.13 18), oklch(0.50 0.12 14)); }
+.tone-teal   { background: linear-gradient(150deg, oklch(0.64 0.10 200), oklch(0.48 0.09 205)); }
+.tone-violet { background: linear-gradient(150deg, oklch(0.62 0.13 300), oklch(0.46 0.12 300)); }
+.tone-gold   { background: linear-gradient(150deg, oklch(0.72 0.12 78), oklch(0.55 0.11 62)); }
+.tone-sage   { background: linear-gradient(150deg, oklch(0.66 0.09 150), oklch(0.50 0.08 150)); }
+.tone-clay   { background: linear-gradient(150deg, oklch(0.66 0.11 44), oklch(0.50 0.10 38)); }
+
+/* ─── responsive collapse ─── */
+@media (max-width: 900px) {
+  #app {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    grid-template-areas: "brand" "clock" "timer" "ambiance" "friends" "board";
+    height: auto;
+    overflow-y: auto;
+  }
+  .clock { justify-self: start; text-align: left; }
+  body { overflow: auto; }
+}
